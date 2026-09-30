@@ -1,0 +1,87 @@
+### Extensão "REST Client" do VS Code: clique em "Send Request" acima de cada bloco.
+
+@base = http://localhost:3000
+
+### Categorias
+POST {{base}}/categorias
+Content-Type: application/json
+
+{ "nome": "Financeiro", "descricao": "Balanços e prestações de contas" }
+
+###
+GET {{base}}/categorias
+
+###
+GET {{base}}/categorias/1
+
+###
+PUT {{base}}/categorias/1
+Content-Type: application/json
+
+{ "nome": "Financeiro (atualizado)" }
+
+###
+DELETE {{base}}/categorias/1
+
+### Destinatários
+POST {{base}}/destinatarios
+Content-Type: application/json
+
+{ "nome": "Tribunal de Contas", "email": "contato@tc.gov.br", "orgao": "TCE" }
+
+###
+GET {{base}}/destinatarios
+
+###
+GET {{base}}/destinatarios/1
+
+###
+PUT {{base}}/destinatarios/1
+Content-Type: application/json
+
+{ "nome": "TCE-RJ", "email": "tce@rj.gov.br" }
+
+###
+DELETE {{base}}/destinatarios/1
+
+### Relatórios — 2º CRUD: adicionar relatório + arquivo
+POST {{base}}/relatorios
+Content-Type: application/json
+
+{
+  "titulo": "Balanço Anual",
+  "descricao": "Exercício 2025",
+  "categoriaId": 1,
+  "destinatarioId": 1,
+  "arquivo": { "nome": "balanco.pdf", "tipo": "application/pdf", "tamanhoKb": 320 }
+}
+
+### Relatórios — 1º CRUD: lista de relatórios a enviar
+GET {{base}}/relatorios?status=pendente
+
+###
+GET {{base}}/relatorios
+
+###
+GET {{base}}/relatorios/1
+
+### Relatórios — 3º CRUD: atualizar um registro já adicionado
+PUT {{base}}/relatorios/1
+Content-Type: application/json
+
+{
+  "titulo": "Balanço Anual (revisado)",
+  "categoriaId": 1,
+  "destinatarioId": 1,
+  "arquivo": { "nome": "balanco_v2.pdf", "tipo": "application/pdf", "tamanhoKb": 410 },
+  "status": "enviado"
+}
+
+###
+DELETE {{base}}/relatorios/1
+
+### Teste do Zod barrando dados inválidos (deve dar 400)
+POST {{base}}/relatorios
+Content-Type: application/json
+
+{ "titulo": "oi", "categoriaId": -5 }

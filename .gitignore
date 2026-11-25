@@ -1,6 +1,8 @@
-node_modules
-dist
-data
+# Regras gerais (cada pasta também tem o seu .gitignore)
+node_modules/
+.env
 *.db
 *.db-shm
 *.db-wal
+.DS_Store
+.claude/

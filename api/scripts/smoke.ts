@@ -1,13 +1,18 @@
-// Teste de ponta a ponta: simula as 3 telas + casos de erro.
+// Teste de ponta a ponta: autenticação JWT, as 3 telas, os 4 CRUDs e casos de erro.
 // Uso: com o servidor rodando (npm run dev), execute:  npm run smoke
 import assert from "node:assert/strict";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 
+let token: string | null = null; // preenchido depois do registro
+
 async function chamar(metodo: string, caminho: string, corpo?: unknown) {
   const resp = await fetch(BASE + caminho, {
     method: metodo,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
     body: corpo === undefined ? undefined : JSON.stringify(corpo),
   });
   const texto = await resp.text();
@@ -22,6 +27,73 @@ function ok(descricao: string) {
 
 async function main() {
   console.log(`\nTestando ${BASE}\n`);
+
+  // --- Autenticação (JWT) ---
+  assert.equal((await chamar("GET", "/categorias")).status, 401);
+  ok("GET /categorias sem token → 401");
+
+  const email = `smoke${Date.now()}@teste.com`;
+  const registro = await chamar("POST", "/auth/registrar", {
+    nome: "Teste Smoke",
+    email,
+    senha: "123456",
+  });
+  assert.equal(registro.status, 201);
+  assert.ok(registro.dados.token);
+  assert.equal(registro.dados.usuario.senha, undefined); // a senha nunca volta
+  ok("POST /auth/registrar → 201 com token");
+
+  assert.equal((await chamar("POST", "/auth/registrar", { nome: "X", email: "x", senha: "1" })).status, 400);
+  ok("POST /auth/registrar inválido → 400");
+
+  assert.equal((await chamar("POST", "/auth/login", { email, senha: "errada" })).status, 401);
+  ok("POST /auth/login com senha errada → 401");
+
+  const login = await chamar("POST", "/auth/login", { email, senha: "123456" });
+  assert.equal(login.status, 200);
+  token = login.dados.token;
+  ok("POST /auth/login → 200 com token");
+
+  const eu = await chamar("GET", "/auth/me");
+  assert.equal(eu.dados.email, email);
+  ok("GET /auth/me → dono do token");
+
+  const tokenValido = token;
+  token = "token-falso";
+  assert.equal((await chamar("GET", "/relatorios")).status, 401);
+  token = tokenValido;
+  ok("Token inválido → 401");
+
+  // --- 4º CRUD: usuários ---
+  const outro = await chamar("POST", "/usuarios", {
+    nome: "Outro Usuário",
+    email: `outro${Date.now()}@teste.com`,
+    senha: "abcdef",
+  });
+  assert.equal(outro.status, 201);
+  ok("POST /usuarios → 201");
+
+  assert.equal((await chamar("POST", "/usuarios", { nome: "Repetido", email, senha: "123456" })).status, 409);
+  ok("POST /usuarios com e-mail repetido → 409");
+
+  const outroAtual = await chamar("PUT", `/usuarios/${outro.dados.id}`, {
+    nome: "Outro (editado)",
+    email: outro.dados.email,
+  });
+  assert.equal(outroAtual.status, 200);
+  assert.equal(outroAtual.dados.nome, "Outro (editado)");
+  ok("PUT /usuarios/:id sem senha → 200 (mantém a senha)");
+
+  const usuarios = await chamar("GET", "/usuarios");
+  assert.ok(usuarios.dados.some((u: { id: number }) => u.id === outro.dados.id));
+  assert.equal((await chamar("GET", `/usuarios/${outro.dados.id}`)).status, 200);
+  ok("GET /usuarios e GET /usuarios/:id → 200");
+
+  assert.equal((await chamar("DELETE", `/usuarios/${login.dados.usuario.id}`)).status, 409);
+  ok("DELETE do próprio usuário → 409");
+
+  assert.equal((await chamar("DELETE", `/usuarios/${outro.dados.id}`)).status, 204);
+  ok("DELETE /usuarios/:id → 204");
 
   // --- Preparação: categoria e destinatário ---
   const cat = await chamar("POST", "/categorias", { nome: "Financeiro", descricao: "Balanços" });
@@ -142,7 +214,7 @@ async function main() {
   const docs = await chamar("GET", "/docs.json");
   assert.equal(docs.status, 200);
   assert.ok(String(docs.dados.openapi).startsWith("3."));
-  assert.ok(Object.keys(docs.dados.paths).length >= 7);
+  assert.ok(Object.keys(docs.dados.paths).length >= 12);
   ok("GET /docs.json → documento OpenAPI com as rotas");
 
   const ui = await fetch(BASE + "/docs/");

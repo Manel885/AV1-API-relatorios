@@ -1,3 +1,4 @@
+import "./config"; // primeiro: carrega o .env antes de abrir o banco
 import { app } from "./app";
 import { db } from "./database/db";
 

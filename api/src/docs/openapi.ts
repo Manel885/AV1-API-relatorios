@@ -2,6 +2,11 @@ import { z } from "zod";
 import { criarCategoriaSchema } from "../schemas/categoria.schema";
 import { criarDestinatarioSchema } from "../schemas/destinatario.schema";
 import { criarRelatorioSchema, statusRelatorio } from "../schemas/relatorio.schema";
+import {
+  atualizarUsuarioSchema,
+  criarUsuarioSchema,
+  loginSchema,
+} from "../schemas/usuario.schema";
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +41,11 @@ const relatorioSaida = criarRelatorioSchema.extend({
   destinatarioNome: z.string(),
   criadoEm: z.string().describe("Data/hora de criação (UTC), ex.: 2026-09-30 14:05:00"),
 });
+// Usuário devolvido pela API: sem a senha
+const usuarioSaida = criarUsuarioSchema.omit({ senha: true }).extend({
+  id: z.number().int(),
+  criadoEm: z.string(),
+});
 
 const ref = (nome: string) => ({ $ref: `#/components/schemas/${nome}` });
 const refResposta = (nome: string) => ({ $ref: `#/components/responses/${nome}` });
@@ -43,7 +53,7 @@ const json = (schema: Json, example?: unknown) => ({
   "application/json": { schema, ...(example !== undefined && { example }) },
 });
 
-// ---------- Fábrica de rotas: os 3 CRUDs têm o MESMO formato ----------
+// ---------- Fábrica de rotas: os 4 CRUDs têm o MESMO formato ----------
 type Recurso = {
   tag: string; // agrupador no Swagger
   caminho: string; // "/categorias"
@@ -52,6 +62,7 @@ type Recurso = {
   plural: string; // "categorias"
   nomeId: string; // "Categoria" (usado em operationId, sem acento)
   entrada: string; // nome do schema de entrada em components
+  entradaPut?: string; // schema do PUT, quando for diferente do POST
   saida: string; // nome do schema de saída em components
   exemplo: Json; // corpo de exemplo para o "Try it out"
   descricaoLista?: string;
@@ -60,7 +71,11 @@ type Recurso = {
   parametrosLista?: Json[];
   erro400Vinculo?: boolean; // POST/PUT podem dar 400 por categoriaId/destinatarioId inexistente
   conflitoNoDelete?: string; // DELETE pode dar 409
+  conflitoNoSalvar?: boolean; // POST/PUT podem dar 409 (ex.: e-mail repetido)
 };
+
+// Toda rota dos CRUDs exige token: 401 se faltar ou for inválido
+const resposta401 = { "401": { $ref: "#/components/responses/NaoAutorizado401" } };
 
 function crud(r: Recurso): Json {
   const parametroId = {
@@ -76,6 +91,10 @@ function crud(r: Recurso): Json {
     required: true,
     content: json(ref(r.entrada), r.exemplo),
   };
+  const corpoPut = r.entradaPut
+    ? { required: true, content: json(ref(r.entradaPut), r.exemplo) }
+    : corpo;
+  const resposta409Salvar = r.conflitoNoSalvar && { "409": refResposta("Conflito409") };
 
   const desc400Vinculo = r.erro400Vinculo
     ? " Também retorna 400 se `categoriaId` ou `destinatarioId` não existirem."
@@ -95,6 +114,7 @@ function crud(r: Recurso): Json {
             content: json({ type: "array", items: ref(r.saida) }),
           },
           ...(r.parametrosLista && { "400": refResposta("Erro400") }),
+          ...resposta401,
         },
       },
       post: {
@@ -109,6 +129,8 @@ function crud(r: Recurso): Json {
             content: json(ref(r.saida)),
           },
           "400": refResposta("Erro400"),
+          ...resposta401,
+          ...resposta409Salvar,
         },
       },
     },
@@ -121,6 +143,7 @@ function crud(r: Recurso): Json {
         responses: {
           "200": { description: "Encontrado", content: json(ref(r.saida)) },
           "400": refResposta("Erro400"),
+          ...resposta401,
           "404": refResposta("NaoEncontrado404"),
         },
       },
@@ -131,11 +154,13 @@ function crud(r: Recurso): Json {
         description:
           `Substitui **todos** os campos (é um PUT completo, não parcial). ${r.descricaoAtualizar ?? ""}${desc400Vinculo}`.trim(),
         parameters: [parametroId],
-        requestBody: corpo,
+        requestBody: corpoPut,
         responses: {
           "200": { description: "Atualizado", content: json(ref(r.saida)) },
           "400": refResposta("Erro400"),
+          ...resposta401,
           "404": refResposta("NaoEncontrado404"),
+          ...resposta409Salvar,
         },
       },
       delete: {
@@ -146,6 +171,7 @@ function crud(r: Recurso): Json {
         responses: {
           "204": { description: "Removido com sucesso (sem corpo na resposta)" },
           "400": refResposta("Erro400"),
+          ...resposta401,
           "404": refResposta("NaoEncontrado404"),
           ...(r.conflitoNoDelete && { "409": refResposta("Conflito409") }),
         },
@@ -170,11 +196,19 @@ export const openApiDocument: Json = {
       "",
       "Antes de criar um relatório, crie ao menos uma categoria e um destinatário.",
       "O arquivo é registrado por seus metadados (nome, tipo, tamanho).",
+      "",
+      "**Autenticação (JWT):** crie uma conta em `POST /auth/registrar` ou entre em `POST /auth/login`,",
+      "copie o `token` da resposta, clique em **Authorize** (cadeado) e cole o token.",
+      "Todas as rotas dos CRUDs exigem o cabeçalho `Authorization: Bearer <token>`.",
     ].join("\n"),
   },
   servers: [{ url: "/", description: "Servidor atual" }],
+  // Por padrão toda rota exige token; as públicas sobrescrevem com security: []
+  security: [{ bearerAuth: [] }],
   tags: [
     { name: "Sistema", description: "Verificação de disponibilidade" },
+    { name: "Autenticação", description: "Cadastro, login e token JWT" },
+    { name: "Usuários", description: "Contas com acesso ao sistema" },
     { name: "Relatórios", description: "Registro principal: um arquivo a enviar a um destinatário" },
     { name: "Categorias", description: "Classificam os relatórios" },
     { name: "Destinatários", description: "Para quem cada relatório será enviado" },
@@ -185,6 +219,7 @@ export const openApiDocument: Json = {
         tags: ["Sistema"],
         operationId: "verificarSaude",
         summary: "Verifica se a API está no ar",
+        security: [],
         responses: {
           "200": {
             description: "API disponível",
@@ -197,6 +232,69 @@ export const openApiDocument: Json = {
               { mensagem: "API de relatórios no ar!", docs: "/docs" },
             ),
           },
+        },
+      },
+    },
+
+    "/auth/registrar": {
+      post: {
+        tags: ["Autenticação"],
+        operationId: "registrar",
+        summary: "Cria uma conta e devolve o token JWT",
+        security: [],
+        requestBody: {
+          required: true,
+          content: json(ref("UsuarioEntrada"), {
+            nome: "Maria Silva",
+            email: "maria@exemplo.com",
+            senha: "123456",
+          }),
+        },
+        responses: {
+          "201": { description: "Conta criada", content: json(ref("RespostaLogin")) },
+          "400": refResposta("Erro400"),
+          "409": refResposta("Conflito409"),
+        },
+      },
+    },
+    "/auth/login": {
+      post: {
+        tags: ["Autenticação"],
+        operationId: "login",
+        summary: "Entra com e-mail e senha e devolve o token JWT",
+        security: [],
+        requestBody: {
+          required: true,
+          content: json(ref("LoginEntrada"), { email: "maria@exemplo.com", senha: "123456" }),
+        },
+        responses: {
+          "200": { description: "Login feito", content: json(ref("RespostaLogin")) },
+          "400": refResposta("Erro400"),
+          "401": {
+            description: "E-mail ou senha inválidos",
+            content: json(ref("ErroSimples"), { erro: "E-mail ou senha inválidos" }),
+          },
+        },
+      },
+    },
+    "/auth/me": {
+      get: {
+        tags: ["Autenticação"],
+        operationId: "usuarioLogado",
+        summary: "Devolve o usuário dono do token",
+        responses: {
+          "200": {
+            description: "Usuário do token",
+            content: json({
+              type: "object",
+              properties: {
+                id: { type: "integer" },
+                nome: { type: "string" },
+                email: { type: "string" },
+              },
+            }),
+          },
+          ...resposta401,
         },
       },
     },
@@ -261,10 +359,39 @@ export const openApiDocument: Json = {
       exemplo: { nome: "Tribunal de Contas", email: "contato@tc.gov.br", orgao: "TCE" },
       conflitoNoDelete: "Destinatário com relatórios vinculados não pode ser removido",
     }),
+
+    ...crud({
+      tag: "Usuários",
+      caminho: "/usuarios",
+      um: "um",
+      singular: "usuário",
+      plural: "usuários",
+      nomeId: "Usuario",
+      entrada: "UsuarioEntrada",
+      entradaPut: "UsuarioAtualizar",
+      saida: "Usuario",
+      exemplo: { nome: "João Souza", email: "joao@exemplo.com", senha: "123456" },
+      descricaoCriar: "A senha é salva com hash (bcrypt) e nunca é devolvida. Retorna 409 se o e-mail já existir.",
+      descricaoAtualizar: "A `senha` é opcional: se não vier, a atual é mantida.",
+      conflitoNoDelete: "Não é possível excluir o próprio usuário",
+      conflitoNoSalvar: true,
+    }),
   },
 
   components: {
+    securitySchemes: {
+      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+    },
     schemas: {
+      UsuarioEntrada: paraOpenApi(criarUsuarioSchema, "input"),
+      UsuarioAtualizar: paraOpenApi(atualizarUsuarioSchema, "input"),
+      Usuario: paraOpenApi(usuarioSaida, "output"),
+      LoginEntrada: paraOpenApi(loginSchema, "input"),
+      RespostaLogin: {
+        type: "object",
+        properties: { token: { type: "string" }, usuario: ref("Usuario") },
+        required: ["token", "usuario"],
+      },
       RelatorioEntrada: paraOpenApi(criarRelatorioSchema, "input"),
       Relatorio: paraOpenApi(relatorioSaida, "output"),
       CategoriaEntrada: paraOpenApi(criarCategoriaSchema, "input"),
@@ -314,6 +441,10 @@ export const openApiDocument: Json = {
             },
           ],
         }),
+      },
+      NaoAutorizado401: {
+        description: "Token JWT ausente, inválido ou expirado",
+        content: json(ref("ErroSimples"), { erro: "Token não informado" }),
       },
       NaoEncontrado404: {
         description: "Registro não encontrado",

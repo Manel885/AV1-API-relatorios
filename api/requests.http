@@ -2,50 +2,106 @@
 
 @base = http://localhost:3000
 
+### Autenticação — 1) crie a conta (ou faça login) e copie o "token" da resposta
+POST {{base}}/auth/registrar
+Content-Type: application/json
+
+{ "nome": "Maria Silva", "email": "maria@exemplo.com", "senha": "123456" }
+
+###
+# @name login
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "maria@exemplo.com", "senha": "123456" }
+
+### 2) O token do login acima é usado automaticamente nas próximas requisições
+@token = {{login.response.body.token}}
+
+###
+GET {{base}}/auth/me
+Authorization: Bearer {{token}}
+
+### Sem token (deve dar 401)
+GET {{base}}/categorias
+
+### Usuários
+GET {{base}}/usuarios
+Authorization: Bearer {{token}}
+
+###
+POST {{base}}/usuarios
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "nome": "João Souza", "email": "joao@exemplo.com", "senha": "abcdef" }
+
+###
+PUT {{base}}/usuarios/2
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "nome": "João Souza (editado)", "email": "joao@exemplo.com" }
+
+###
+DELETE {{base}}/usuarios/2
+Authorization: Bearer {{token}}
+
 ### Categorias
 POST {{base}}/categorias
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "nome": "Financeiro", "descricao": "Balanços e prestações de contas" }
 
 ###
 GET {{base}}/categorias
+Authorization: Bearer {{token}}
 
 ###
 GET {{base}}/categorias/1
+Authorization: Bearer {{token}}
 
 ###
 PUT {{base}}/categorias/1
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "nome": "Financeiro (atualizado)" }
 
 ###
 DELETE {{base}}/categorias/1
+Authorization: Bearer {{token}}
 
 ### Destinatários
 POST {{base}}/destinatarios
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "nome": "Tribunal de Contas", "email": "contato@tc.gov.br", "orgao": "TCE" }
 
 ###
 GET {{base}}/destinatarios
+Authorization: Bearer {{token}}
 
 ###
 GET {{base}}/destinatarios/1
+Authorization: Bearer {{token}}
 
 ###
 PUT {{base}}/destinatarios/1
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "nome": "TCE-RJ", "email": "tce@rj.gov.br" }
 
 ###
 DELETE {{base}}/destinatarios/1
+Authorization: Bearer {{token}}
 
 ### Relatórios — 2º CRUD: adicionar relatório + arquivo
 POST {{base}}/relatorios
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -58,15 +114,19 @@ Content-Type: application/json
 
 ### Relatórios — 1º CRUD: lista de relatórios a enviar
 GET {{base}}/relatorios?status=pendente
+Authorization: Bearer {{token}}
 
 ###
 GET {{base}}/relatorios
+Authorization: Bearer {{token}}
 
 ###
 GET {{base}}/relatorios/1
+Authorization: Bearer {{token}}
 
 ### Relatórios — 3º CRUD: atualizar um registro já adicionado
 PUT {{base}}/relatorios/1
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -79,9 +139,11 @@ Content-Type: application/json
 
 ###
 DELETE {{base}}/relatorios/1
+Authorization: Bearer {{token}}
 
 ### Teste do Zod barrando dados inválidos (deve dar 400)
 POST {{base}}/relatorios
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "titulo": "oi", "categoriaId": -5 }
